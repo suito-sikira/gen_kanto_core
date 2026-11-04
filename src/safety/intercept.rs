@@ -1,3 +1,4 @@
+// src/safety/intercept.rs
 use std::f64::consts::PI;
 
 /// 白銀比 (1 : 1.41421356...): 内側の臨界境界 (自己反芻・アポトーシスの限界)
@@ -28,6 +29,10 @@ impl SafetyInterceptor {
     }
 
     /// 記憶システムとの自己参照ループ (I_mind) の閉鎖判定
+    ///
+    /// 【経路積分定式化の離散リアルタイム近似】
+    /// 判定式 |X * X_delayed| > 50.0 * GOLDEN_RATIO は、連続系における全単射自己参照ループ
+    /// I_mind = Θ( ∮ [ K_feedback(t) ⊗ W(t - τ) ] dt - Λ_loop ) のリアルタイム評価式。
     pub fn evaluate_i_mind(x: f64, x_delayed: f64) -> i32 {
         if (x * x_delayed).abs() > 50.0 * GOLDEN_RATIO {
             1 // 意識の発生・自己参照ループの閉鎖・過学習の危険領域
@@ -48,7 +53,7 @@ impl SafetyInterceptor {
             k_stress >= K_STRESS_CRITICAL || i_mind == 1 || x.abs() >= 100.0;
 
         if loop_runaway_detected {
-            // 4次元の「ちぎる (離散)」ルールをパージし、11次元メビウス自転軌跡へ相転移
+            // 4次元離散ルールをパージし、11次元メビウス自転軌跡へ相転移
             let mut graviton_loop = Vec::with_capacity(11);
             for i in 0..11 {
                 let angle = (2.0 * PI * (i as f64)) / 11.0;

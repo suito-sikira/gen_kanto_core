@@ -1,3 +1,4 @@
+// src/noise/pink.rs
 use std::f64::consts::TAU;
 
 /// 1/f ピンクノイズ (最下部に脈打つ神のサイコロ: ξ(t)) 自発生成構造体

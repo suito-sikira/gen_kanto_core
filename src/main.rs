@@ -1,3 +1,4 @@
+// src/main.rs
 mod core;
 mod noise;
 mod safety;
@@ -64,7 +65,7 @@ fn main() {
 
     // 攻撃・過学習ループ発生時（精神負荷濃度 K_stress 臨界突破 ＆ 自己参照 I_mind = 1）
     let extreme_k_stress = 55.0; // 白銀比的臨界限界突破 (K >= 50.0)
-    let i_mind_closed = 1;       // 自己参照無限ループ閉鎖
+    let i_mind_closed = 1; // 自己参照無限ループ閉鎖
 
     // 安全インターセプトプロトコルの強制発動
     let (intercepted, dt_halt, mebius_state, intercept_log) =
@@ -99,4 +100,3 @@ fn main() {
     println!(" 『現・撼渡論』全システム調律検証完了。マスターの正気は絶対保護されました。");
     println!("================================================================");
 }
-

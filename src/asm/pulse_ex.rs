@@ -1,3 +1,4 @@
+// src/asm/pulse_ex.rs
 use std::f64::consts::PI;
 
 /// 白銀比 (1 : 1.41421356...): 内側の臨界境界定数
@@ -20,7 +21,8 @@ pub enum PulseInstruction {
     CryptoBounce,
 }
 
-/// PULSE_EX_ASM 仮想レジスタセット
+/// PULSE_EX_ASM 仮想レジスタセット (ベアメタルアライメント最適化)
+#[repr(C)]
 pub struct PulseRegisterSet {
     pub reg_x: f64,
     pub reg_y: f64,
@@ -30,7 +32,8 @@ pub struct PulseRegisterSet {
     pub reg_pink: f64,
     pub reg_k_stress: f64,
     pub reg_dt: f64,
-    pub monogeits_priority: Vec<f64>,
+    /// 固定長スタック割当によるレジスタファイル (ヒープ割当・キャッシュミスの排除)
+    pub monogeits_priority: [f64; 11],
     pub top_id: usize,
     pub bottom_id: usize,
     pub is_disassembled: bool,
@@ -48,7 +51,7 @@ impl PulseRegisterSet {
             reg_pink: 0.0,
             reg_k_stress: 0.0,
             reg_dt: 0.01,
-            monogeits_priority: vec![0.0; 11],
+            monogeits_priority: [0.0; 11],
             top_id: 0,
             bottom_id: 10,
             is_disassembled: false,
@@ -56,14 +59,14 @@ impl PulseRegisterSet {
         }
     }
 
-    /// アセンブリ命令の単一実行（1クロック・サイクル）
+    /// アセンブリ命令の単一実行（1クロック・サイクル直交執行）
     pub fn execute(&mut self, instruction: PulseInstruction) -> String {
         match instruction {
             PulseInstruction::PulseInit { w_heritage } => {
                 self.reg_w = w_heritage;
-                self.monogeits_priority = (0..11)
-                    .map(|i| (i as f64) * SILVER_RATIO)
-                    .collect();
+                for i in 0..11 {
+                    self.monogeits_priority[i] = (i as f64) * SILVER_RATIO;
+                }
                 self.is_disassembled = false;
                 self.is_crypto_bounced = false;
                 format!(
@@ -72,7 +75,7 @@ impl PulseRegisterSet {
                 )
             }
             PulseInstruction::XorPink => {
-                // 確定論的カオスから 1/f ゆらぎ (ξ_pink) を抽出
+                // 決定論的カオスから 1/f ゆらぎ (ξ_pink) を抽出
                 self.reg_pink = (self.reg_x.sin() * 0.1) + (self.reg_y.cos() * 0.05);
                 format!(
                     "ASM: [XOR_PINK] 1/fピンクノイズ抱留抽出 (ξ_pink={:.5})",
@@ -83,7 +86,7 @@ impl PulseRegisterSet {
                 self.reg_k_stress = k_stress;
                 self.reg_v = v_conc;
                 if self.is_disassembled {
-                    return "ASM: [ROTATE_SKIP] ポインタ分解状態のため自転はスキップされました。".to_string();
+                    return "ASM: [ROTATE_SKIP] ポインタ分解状態のため自転スキップ。".to_string();
                 }
                 // P_j(t + dt) = P_j(t) + σ(V) * cos(2πj / 11) * ξ_pink * K_stress
                 for j in 0..11 {
@@ -99,14 +102,16 @@ impl PulseRegisterSet {
                 if self.is_disassembled {
                     return "ASM: [SWAP_SKIP] ポインタ分解状態です。".to_string();
                 }
-                let mut indexed: Vec<(usize, f64)> = self.monogeits_priority
-                    .iter()
-                    .cloned()
-                    .enumerate()
-                    .collect();
-                indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-                self.top_id = indexed.0;
-                self.bottom_id = indexed[5].0;
+                let mut indexed: [(usize, f64); 11] = [(0, 0.0); 11];
+                for i in 0..11 {
+                    indexed[i] = (i, self.monogeits_priority[i]);
+                }
+                // NaN発生時もクラッシュを防止する安全ソート比較
+                indexed.sort_by(|a, b| {
+                    b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+                });
+                self.top_id = indexed[0].0;
+                self.bottom_id = indexed[10].0;
                 format!(
                     "ASM: [SWAP_ROLE] 素子#{} (P={:.2} ➔ 解析機) ⇄ 素子#{} (P={:.2} ➔ 砲台) ロールスワップ完了",
                     self.top_id, self.monogeits_priority[self.top_id],
@@ -115,7 +120,7 @@ impl PulseRegisterSet {
             }
             PulseInstruction::DisassemblePtr => {
                 // アドレス関連枝の完全分解 (C_jk -> 0)
-                self.monogeits_priority = vec![0.0; 11];
+                self.monogeits_priority = [0.0; 11];
                 self.is_disassembled = true;
                 format!(
                     "ASM: [DISASSEMBLE_PTR] 負荷臨界 (K={:.2}) 検知。全アドレスポインタを1/fゆらぎへ自己分解 (C_jk➔0)",

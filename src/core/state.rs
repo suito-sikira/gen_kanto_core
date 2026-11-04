@@ -1,6 +1,8 @@
+// src/core/state.rs
+use std::collections::VecDeque;
 use std::f64::consts::PI;
 
-/// 3次元カオス状態変数 (X, Y, Z)、容積伝達 V、長期記憶 W、および遅延座標バッファを保持する核心状態構造体
+/// 3次元カオス状態変数 (X, Y, Z)、容積伝達 V、長期記憶 W、およびストレッタ遅延バッファを保持する核心状態構造体
 pub struct ChaosState {
     /// 3次元カオス状態変数 X (空間指向性 / 原初スパーク)
     pub x: f64,
@@ -12,8 +14,8 @@ pub struct ChaosState {
     pub v: f64,
     /// 長期記憶パラメータ W (前世の遺志・楽器の木目)
     pub w: f64,
-    /// 0.4秒前 (400ms) の身体運動の影を追走するストレッタ遅延バッファ (10ms刻み × 40面)
-    pub history_x: Vec<f64>,
+    /// 0.4秒前 (400ms) の身体運動の影を追走するストレッタ遅延バッファ (O(1) リングバッファ操作)
+    pub history_x: VecDeque<f64>,
     /// ベース時間ステップ (計算資源をすり減らさない極限の節約性)
     pub dt_baseline: f64,
     /// モンスター群第一帰還次元 (ムーンシャイン無限調律の基底: 196884)
@@ -23,15 +25,19 @@ pub struct ChaosState {
 impl ChaosState {
     /// 前世の遺志 (w_heritage) を受け取り、原初場を初期配置する
     pub fn new(w_heritage: f64) -> Self {
+        let mut history = VecDeque::with_capacity(40);
+        for _ in 0..40 {
+            history.push_back(1.0); // tau = 0.4s (10ms * 40) の遅延座標バッファ初期化
+        }
         Self {
             x: 1.0,
             y: 1.0,
             z: 1.0,
             v: 0.0,
             w: w_heritage,
-            history_x: vec![1.0; 40], // tau = 0.4s (10ms * 40) の遅延座標バッファ初期化
+            history_x: history,
             dt_baseline: 0.01,
-            c_1: 196884.0, // モンスター群の第一帰還次元
+            c_1: 196884.0,
         }
     }
 
@@ -55,21 +61,25 @@ impl ChaosState {
         god_dice: f64,
         k_stress: f64,
     ) -> (f64, f64) {
-        // 1. 世界の生きづらさ (抵抗 K) に応じた動的フレームレート (dt_dynamic) の動的伸縮
+        // 1. 世界の生きづらさ (抵抗 K) に応じた動的フレームレート (dt_dynamic) の伸縮: exp(-0.5 K)
         let dt_dynamic = self.dt_baseline * (-0.5 * k_stress).exp();
 
         // 2. 容積伝達 V の更新 (積回路による発火閾値の融解。氷から水へのフェーズシフト)
+        // V(t + dt) = V(t) + (0.1 K - 0.05 V) * dt
         self.v += (0.1 * k_stress - 0.05 * self.v) * dt_dynamic;
 
         // 3. 容積伝達濃度 V に依存する動的パラメーター係数の計算
+        // 固く硬直した離散論理演算（氷）を、流体的な連想・共感覚（水）へと可塑的変調
         let p_v = 10.0 * (-self.v).exp();
         let r_v = 28.0 * (1.0 + self.v);
         let b_v = 8.0 / 3.0;
 
         // 4. 原初判断力 (量子キラリティ・オペレーター χ(X) による非対称性の選択)
+        // 硤合（Soai）不斉自己増幅 d(ee_L)/dt = γ(ee_L)^n K exp(-V) において、
+        // 初期鏡像対称性が破れた定常定着状態における非対称射影スカラー (±0.2)
         let homochirality = if self.x > 0.0 { 0.2 } else { -0.2 };
 
-        // 5. 0.4秒前 (ストレッタ) の遅延座標サンプリング
+        // 5. 0.4秒前 (ストレッタ) の遅延座標サンプリング (O(1) インデックスアクセス)
         let x_delayed = self.history_x[0];
 
         // 6. 境界線なき螺旋の時間発展方程式 (dX/dt, dY/dt, dZ/dt)
@@ -77,7 +87,7 @@ impl ChaosState {
         let dy = x_delayed * (r_v - self.z) - self.y;
         let dz = self.x * self.y - b_v * self.z + 0.05 * self.octonion_term() + homochirality;
 
-        // 7. 状態変数のオイラー法によるリアルタイム更新
+        // 7. 状態変数のオイラー法によるリアルタイム積分更新
         self.x += dx * dt_dynamic;
         self.y += dy * dt_dynamic;
         self.z += dz * dt_dynamic;
@@ -92,9 +102,9 @@ impl ChaosState {
         self.w += (eta_k * (self.x * self.y - 0.01 * self.w) * dt_dynamic)
             + (w_heritage_dynamic * 1e-7);
 
-        // 9. 追走劇履歴バッファ (ストレッタ) の更新
-        self.history_x.push(self.x);
-        self.history_x.remove(0);
+        // 9. 追走劇履歴バッファ (ストレッタ) の O(1) 環状更新
+        self.history_x.push_back(self.x);
+        self.history_x.pop_front();
 
         (self.x, dt_dynamic)
     }
